@@ -1,0 +1,20 @@
+# Headless service is used for unique identification
+# of the brokers from the internal network. It is used
+# for the INTERNAL listener resolution. INTERNAL://kafka-${KAFKA_BROKER_ID}.kafka-headless:9092
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: staging
+spec:
+  clusterIP: None
+  ports:
+  - name: broker
+    port: 9092
+    protocol: TCP
+    targetPort: 9092
+  selector:
+    app: kafka
+  sessionAffinity: None
+  type: ClusterIP

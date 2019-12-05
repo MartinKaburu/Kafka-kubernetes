@@ -1,0 +1,14 @@
+# create storage class for the kafka claim PersistentVolumeClaim
+# this allows us to set a reclaimPolicy and to allowVolumeExpansion
+ 
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: gp2
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+mountOptions:
+  - debug

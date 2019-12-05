@@ -1,0 +1,34 @@
+# Expose zookeeper internally and externally
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-zookeeper
+  namespace: default
+spec:
+  ports:
+  - name: zoo
+    port: 2181
+    protocol: TCP
+    targetPort: server
+  selector:
+    app: kafka-zookeeper
+  sessionAffinity: None
+  type: NodePort
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-zookeeper-lb
+  namespace: default
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  ports:
+  - port: 9090
+    targetPort: 2181
+    protocol: TCP
+  selector:
+    name: kafka-zookeeper
