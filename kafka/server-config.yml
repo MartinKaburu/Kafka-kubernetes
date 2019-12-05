@@ -1,0 +1,143 @@
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  namespace: dafault
+apiVersion: v1
+data:
+  init.sh: |-
+    #! /bin/bash
+
+    set -e
+
+    configure_kubectl(){
+      mkdir -p  ~/.aws
+      touch ~/.aws/credentials
+      cat <<EOT > ~/.aws/credentials
+    [default]
+    aws_access_key_id = $AWS_ACCESS_KEY
+    aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
+    region = $REGION
+    EOT
+      aws eks --region ap-south-1 update-kubeconfig --name spincity-staging
+      CONTEXT=$(aws eks --region $REGION update-kubeconfig --name $CLUSTER_NAME | awk '{print $3}')
+      kubectl config use-context $CONTEXT
+    }
+
+    initialise_kafka(){
+      KAFKA_BROKER_ID=${HOSTNAME##*-}
+      SEDS=("s/#init#broker.id=#init#/broker.id=$KAFKA_BROKER_ID/")
+      LABELS="kafka-broker-id=$KAFKA_BROKER_ID"
+      ANNOTATIONS=""
+
+      # check if kubectl is installed
+      hash kubectl 2>/dev/null || {
+        echo "kubectl not found in path."
+        SEDS+=("s/#init#broker.rack=#init#/#init#broker.rack=# kubectl not found in path/")
+        return 1
+      } && {
+        # set zone label
+        ZONE=$(kubectl get node "$NODE_NAME" -o=go-template='{{index .metadata.labels "failure-domain.beta.kubernetes.io/zone"}}')
+        if [[ "x$ZONE" == "x<no value>" ]]; then
+          SEDS+=("s/#init#broker.rack=#init#/#init#broker.rack=# zone label not found for node $NODE_NAME/")
+        else
+          SEDS+=("s/#init#broker.rack=#init#/broker.rack=$ZONE/")
+          LABELS="$LABELS kafka-broker-rack=$ZONE"
+        fi
+
+        # get external loadbalancer endpoint
+        EXTERNAL_HOST=$(kubectl get svc "kafka-$KAFKA_BROKER_ID-lb" -o json -n $POD_NAMESPACE  | jq -r '.status.loadBalancer.ingress[0].hostname')
+        EXTERNAL_PORT=9090
+
+        # set internal and external listeners
+        SEDS+=("s|#init#advertised.listeners=PLAINTEXT://#init#|advertised.listeners=INTERNAL://kafka-${KAFKA_BROKER_ID}.kafka-headless:9092,EXTERNAL://${EXTERNAL_HOST}:${EXTERNAL_PORT}|")
+        ANNOTATIONS="$ANNOTATIONS kafka-listener-outside-host=$EXTERNAL_HOST kafka-listener-outside-port=$EXTERNAL_PORT"
+
+        # apply labels and annotations
+        if [[ ! -z "$LABELS" ]]; then
+          LABELS="$LABELS kafka-set-component=kafka-$KAFKA_BROKER_ID"
+          kubectl -n $POD_NAMESPACE label pod $POD_NAME $LABELS --overwrite || echo "Failed to label $POD_NAMESPACE.$POD_NAME - RBAC issue?"
+        fi
+        if [[ ! -z "$ANNOTATIONS" ]]; then
+          kubectl -n $POD_NAMESPACE annotate pod $POD_NAME $ANNOTATIONS --overwrite || echo "Failed to annotate $POD_NAMESPACE.$POD_NAME - RBAC issue?"
+        fi
+      }
+
+      # execute sed statements
+      printf '%s\n' "${SEDS[@]}" | sed -f - /bitnami/kafka/server.properties > /opt/bitnami/kafka/conf/server.properties
+      [[ $? -eq 0 ]] && cat /opt/bitnami/kafka/conf/server.properties
+    }
+
+
+    main() {
+      configure_kubectl
+      initialise_kafka
+    }
+
+    main
+  server.properties: |-
+    ############################# Server Basics ################################
+    #init#broker.id=#init#
+    #init#broker.rack=#init#
+    ######################### Socket Server Settings ###########################
+    # port=9092
+    # host.name=
+    listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+    inter.broker.listener.name=INTERNAL
+    listeners=INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9093
+    #init#advertised.listeners=PLAINTEXT://#init#
+    # advertised.host.name=<hostname_routable_by_clients>
+    # advertised.port=<port accessible by clients>
+    num.network.threads=3
+    num.io.threads=8
+    # socket.send.buffer.bytes=1048576
+    # socket.receive.buffer.bytes=1048576
+    # socket.request.max.bytes=104857600
+    # queued.max.requests=16
+    # fetch.purgatory.purge.interval.requests=100
+    # producer.purgatory.purge.interval.requests=100
+
+    ############################# Log Basics ###################################
+    # log.dirs=<Log_dir_path>
+    # num.partitions=4
+    # num.recovery.threads.per.data.dir=1
+    # log.index.size.max.bytes=154624
+    # log.index.interval.bytes=4096
+    # message.max.bytes=1000000
+    auto.create.topics.enable=true
+
+    ############################# Log Flush Policy #############################
+    # default.replication.factor=1
+    # log.flush.interval.messages=100000
+    # log.flush.interval.ms=50000
+    # log.flush.scheduler.interval.ms=2000
+
+    ########################## Log Retention Policy ############################
+    log.retention.hours=168
+    log.retention.bytes=1073741824
+    log.segment.bytes=1073741824
+    log.retention.check.interval.ms=300000
+    log.cleaner.enable=false
+    log.roll.hours=168
+
+    ################################ Zookeeper #################################
+
+    zookeeper.connect=kafka-zookeeper-headless:2181
+    zookeeper.connection.timeout.ms=40000
+    # zk.sync.time.ms=2000
+
+    ## Replication configurations
+    num.replica.fetchers=4
+    replica.fetch.max.bytes=1048576
+    replica.fetch.wait.max.ms=500
+    replica.high.watermark.checkpoint.interval.ms=5000
+    replica.socket.timeout.ms=30000
+    replica.socket.receive.buffer.bytes=65536
+    replica.lag.time.max.ms=10000
+    replica.lag.max.messages=4000
+
+    controller.socket.timeout.ms=60000
+    controller.message.queue.size=10
+
+    ####################### Durability and hardening ###########################
+    # retries=0
+    # acks=all

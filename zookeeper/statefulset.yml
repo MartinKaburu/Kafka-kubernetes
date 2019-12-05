@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: default
+spec:
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: kafka-zookeeper
+  serviceName: kafka-zookeeper-headless
+  template:
+    metadata:
+      labels:
+        app: kafka-zookeeper
+    spec:
+      initContainers:
+        - name: volume-permissions
+          image: bitnami/minideb:stretch
+          imagePullPolicy: Always
+          command: ["chown", "-R", "1001:1001", "/bitnami/zookeeper"]
+          securityContext:
+            runAsUser: 0
+          resources: {}
+          volumeMounts:
+          - name: data
+            mountPath: /bitnami/zookeeper
+      containers:
+        - name: zookeeper
+          image: bitnami/zookeeper:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+          - containerPort: 2181
+            name: client
+            protocol: TCP
+          - containerPort: 3888
+            name: election
+            protocol: TCP
+          - containerPort: 2888
+            name: server
+            protocol: TCP
+          env:
+          - name: ZOO_REPLICAS
+            value: "1"
+          - name: JMXAUTH
+            value: "false"
+          - name: JMXDISABLE
+            value: "false"
+          - name: JMXPORT
+            value: "1099"
+          - name: JMXSSL
+            value: "false"
+          - name: ZOO_CLIENT_PORT
+            value: "2181"
+          - name: ZOO_ELECTION_PORT
+            value: "3888"
+          - name: ZOO_HEAP_SIZE
+            value: "1024"
+          - name: ZOO_INIT_LIMIT
+            value: "5"
+          - name: ZOO_LOG_LEVEL
+            value: INFO
+          - name: ZOO_MAX_CLIENT_CNXNS
+            value: "60"
+          - name: ZOO_MAX_SESSION_TIMEOUT
+            value: "40000"
+          - name: ZOO_MIN_SESSION_TIMEOUT
+            value: "4000"
+          - name: ZOO_PURGE_INTERVAL
+            value: "0"
+          - name: ZOO_SERVER_PORT
+            value: "2888"
+          - name: ZOO_SNAP_RETAIN_COUNT
+            value: "3"
+          - name: ZOO_SYNC_LIMIT
+            value: "10"
+          - name: ZOO_TICK_TIME
+            value: "2000"
+          - name: ZOO_ENABLE_AUTH
+            value: "true"
+          - name: ALLOW_ANONYMOUS_LOGIN
+            value: "true"
+          - name: ZOO_SERVER_USER
+            value: "zooadmin"
+          - name: ZOO_SERVER_PASSWORD
+            value: "zoopass"
+          - name: ZOO_CLIENT_USER
+            value: "zoouser"
+          - name: ZOO_CLIENT_PASSWORD
+            value: "zoopass"
+          livenessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+            successThreshold: 1
+          readinessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+            successThreshold: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 500Mi
+            limits:
+              cpu: 400m
+              memory: 1Gi
+          volumeMounts:
+          - mountPath: /bitnami/zookeeper
+            name: data
+      volumes:
+      - emptyDir: {}
+        name: data
+  updateStrategy:
+    type: OnDelete
